@@ -15,7 +15,7 @@ from telegram.helpers import escape_markdown
 
 from assistant.auth import is_allowed
 from assistant.config import Settings
-from assistant.gemini import GeminiAssistant
+from assistant.llm import GroqAssistant
 from assistant.memory import MemoryStore
 
 logger = logging.getLogger(__name__)
@@ -38,9 +38,11 @@ class BotApp:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.memory = MemoryStore(settings.database_path)
-        self.assistant = GeminiAssistant(
-            api_key=settings.gemini_api_key,
-            model=settings.gemini_model,
+        self.assistant = GroqAssistant(
+            groq_api_key=settings.groq_api_key,
+            tavily_api_key=settings.tavily_api_key,
+            model=settings.groq_model,
+            search_max_results=settings.tavily_max_results,
         )
 
     def build(self) -> Application:
@@ -174,10 +176,20 @@ class BotApp:
                 history=history,
                 profile_notes=profile,
             )
-        except Exception:
-            logger.exception("Gemini request failed for chat_id=%s", chat_id)
+        except Exception as exc:
+            logger.exception("Assistant request failed for chat_id=%s", chat_id)
+            detail = str(exc)
+            if "429" in detail or "rate_limit" in detail.lower():
+                await message.reply_text(
+                    "API rate limit hit right now. "
+                    "Wait a minute or two and try again."
+                )
+                return
+            short = detail.split("\n", 1)[0][:240]
             await message.reply_text(
-                "Something went wrong talking to Gemini. Try again in a moment."
+                "Something went wrong generating a reply.\n"
+                f"`{short}`",
+                parse_mode=ParseMode.MARKDOWN,
             )
             return
 

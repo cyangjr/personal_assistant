@@ -16,7 +16,7 @@ def main() -> None:
     app = bot.build()
     logging.getLogger(__name__).info(
         "Starting personal assistant (model=%s, allowlist=%s)",
-        settings.gemini_model,
+        settings.groq_model,
         sorted(settings.allowed_chat_ids),
     )
     app.run_polling(allowed_updates=["message"])

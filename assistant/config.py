@@ -12,11 +12,13 @@ load_dotenv()
 @dataclass(frozen=True)
 class Settings:
     telegram_bot_token: str
-    gemini_api_key: str
+    groq_api_key: str
+    tavily_api_key: str
     allowed_chat_ids: frozenset[int]
-    gemini_model: str = "gemini-2.5-flash"
+    groq_model: str = "llama-3.3-70b-versatile"
     history_limit: int = 20
     database_path: Path = Path("data/assistant.db")
+    tavily_max_results: int = 5
 
 
 def _parse_chat_ids(raw: str) -> frozenset[int]:
@@ -31,14 +33,17 @@ def _parse_chat_ids(raw: str) -> frozenset[int]:
 
 def load_settings() -> Settings:
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    groq_key = os.getenv("GROQ_API_KEY", "").strip()
+    tavily_key = os.getenv("TAVILY_API_KEY", "").strip()
     allowed_raw = os.getenv("ALLOWED_CHAT_IDS", "").strip()
 
     missing = []
     if not token:
         missing.append("TELEGRAM_BOT_TOKEN")
-    if not api_key:
-        missing.append("GEMINI_API_KEY")
+    if not groq_key:
+        missing.append("GROQ_API_KEY")
+    if not tavily_key:
+        missing.append("TAVILY_API_KEY")
     if not allowed_raw:
         missing.append("ALLOWED_CHAT_IDS")
     if missing:
@@ -50,9 +55,11 @@ def load_settings() -> Settings:
 
     return Settings(
         telegram_bot_token=token,
-        gemini_api_key=api_key,
+        groq_api_key=groq_key,
+        tavily_api_key=tavily_key,
         allowed_chat_ids=_parse_chat_ids(allowed_raw),
-        gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip(),
+        groq_model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip(),
         history_limit=int(os.getenv("HISTORY_LIMIT", "20")),
         database_path=Path(os.getenv("DATABASE_PATH", "data/assistant.db")),
+        tavily_max_results=int(os.getenv("TAVILY_MAX_RESULTS", "5")),
     )

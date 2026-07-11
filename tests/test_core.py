@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from assistant.auth import is_allowed
-from assistant.gemini import GeminiAssistant
+from assistant.llm import GroqAssistant
 from assistant.memory import MemoryStore
 
 
@@ -30,7 +30,11 @@ def test_memory_roundtrip(tmp_path: Path):
 
 
 def test_should_use_search():
-    assistant = GeminiAssistant(api_key="unused", model="gemini-2.5-flash")
+    assistant = GroqAssistant(
+        groq_api_key="unused",
+        tavily_api_key="unused",
+        model="llama-3.3-70b-versatile",
+    )
     assert assistant.should_use_search("What are my Costco Executive benefits?")
     assert assistant.should_use_search("Does Chase Sapphire have travel credit?")
     assert not assistant.should_use_search("What's a good pasta recipe?")
