@@ -24,7 +24,7 @@ class OpportunityEngine:
         self.wallet = wallet_store
         self.benefits = benefit_graph
 
-    def scan_chat(self, chat_id: int) -> list[Opportunity]:
+    def scan_chat(self, chat_id: int, *, warm_cache: bool = False) -> list[Opportunity]:
         items = self.wallet.list(chat_id)
         created: list[Opportunity] = []
         for item in items:
@@ -32,11 +32,11 @@ class OpportunityEngine:
                 if self._exists_open(chat_id, draft["title"]):
                     continue
                 created.append(self._insert(chat_id, item.id, draft))
-            # Warm benefit cache for this product
-            try:
-                self.benefits.ensure_product(item.issuer, item.product_name)
-            except Exception:
-                pass
+            if warm_cache:
+                try:
+                    self.benefits.ensure_product(item.issuer, item.product_name)
+                except Exception:
+                    pass
         return created
 
     def list_open(self, chat_id: int) -> list[Opportunity]:
@@ -51,10 +51,21 @@ class OpportunityEngine:
             ).fetchall()
         return [self._row(row) for row in rows]
 
-    def format_open(self, chat_id: int) -> str:
+    def format_open(self, chat_id: int, *, hint: str | None = None) -> str:
         opps = self.list_open(chat_id)
         if not opps:
-            return "No open opportunities. Add wallet items, then /opportunities scan."
+            wallet_count = len(self.wallet.list(chat_id))
+            if wallet_count == 0:
+                return (
+                    "No open opportunities.\n"
+                    "Add cards/memberships first, e.g.\n"
+                    "/wallet add Chase Sapphire Preferred\n"
+                    "Then run /opportunities again."
+                )
+            return hint or (
+                "No open opportunities for your wallet yet.\n"
+                "Try /opportunities scan, or add fee=/renew= on wallet items."
+            )
         lines = ["Open opportunities:"]
         for opp in opps:
             value = (

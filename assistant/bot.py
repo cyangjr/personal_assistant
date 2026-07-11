@@ -36,8 +36,8 @@ Wallet & benefits:
 /wallet add Costco Executive fee\\=120 renew\\=2026\\-12\\-01
 /wallet add Venture X
 /wallet del `<id>`
-/opportunities — unused\\-value opportunities
-/opportunities scan — refresh opportunities now
+/opportunities — scan wallet for unused\\-value opportunities
+/opportunities list — show saved opportunities only
 /claim `<action_key or product>` — claim checklist
 /benefits — cached benefit docs
 /stats — cost \\& latency dashboard
@@ -100,12 +100,8 @@ class BotApp:
 
     async def weekly_opportunity_job(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         for chat_id in self.settings.allowed_chat_ids:
-            created = self.opportunities.scan_chat(chat_id)
-            self.metrics.record(
-                chat_id=chat_id,
-                kind="opportunity_scan",
-                tavily_calls=0,
-            )
+            created = self.opportunities.scan_chat(chat_id, warm_cache=True)
+            self.metrics.record(chat_id=chat_id, kind="opportunity_scan")
             if not created:
                 continue
             preview = "\n".join(f"- {opp.title}" for opp in created[:5])
@@ -356,16 +352,37 @@ class BotApp:
             return
         chat_id = update.effective_chat.id
         args = context.args or []
-        if args and args[0].lower() == "scan":
-            created = self.opportunities.scan_chat(chat_id)
+        mode = args[0].lower() if args else "scan"
+
+        # Default /opportunities always refreshes so it "just works".
+        if mode in {"scan", "refresh"} or not args:
+            await update.effective_message.reply_text("Scanning wallet for opportunities…")
+            try:
+                created = self.opportunities.scan_chat(chat_id, warm_cache=False)
+            except Exception:
+                logger.exception("Opportunity scan failed for chat_id=%s", chat_id)
+                await update.effective_message.reply_text(
+                    "Opportunity scan failed. Check logs and try again."
+                )
+                return
             self.metrics.record(chat_id=chat_id, kind="opportunity_scan")
+            header = f"Scan complete. New opportunities: {len(created)}\n\n"
             await update.effective_message.reply_text(
-                f"Scan complete. New opportunities: {len(created)}\n\n"
-                + self.opportunities.format_open(chat_id)
+                header + self.opportunities.format_open(chat_id)
             )
             return
+
+        if mode == "list":
+            await update.effective_message.reply_text(
+                self.opportunities.format_open(chat_id)
+            )
+            return
+
         await update.effective_message.reply_text(
-            self.opportunities.format_open(chat_id)
+            "Usage:\n"
+            "/opportunities — scan + show\n"
+            "/opportunities list — show saved only\n"
+            "/opportunities scan — force refresh"
         )
 
     async def claim_command(
