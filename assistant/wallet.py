@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
+
+from assistant.catalog import (
+    KnownProduct,
+    ResolveResult,
+    format_candidate_prompt,
+    resolve_product_query,
+)
 
 
 def product_key(issuer: str, product_name: str) -> str:
@@ -66,6 +73,25 @@ class WalletStore:
             item_id = int(cur.lastrowid)
         return self.get(item_id)
 
+    def add_known(
+        self,
+        *,
+        chat_id: int,
+        product: KnownProduct,
+        annual_fee: float | None = None,
+        renewal_date: str | None = None,
+        notes: str = "",
+    ) -> WalletItem:
+        return self.add(
+            chat_id=chat_id,
+            item_type=product.item_type,
+            issuer=product.issuer,
+            product_name=product.product_name,
+            annual_fee=annual_fee,
+            renewal_date=renewal_date,
+            notes=notes,
+        )
+
     def get(self, item_id: int) -> WalletItem:
         with self.db.connect() as conn:
             row = conn.execute(
@@ -100,9 +126,10 @@ class WalletStore:
         if not items:
             return (
                 "Wallet is empty.\n"
-                "Add with:\n"
-                "/wallet add card Chase | Sapphire Preferred\n"
-                "/wallet add membership Costco | Executive fee=120 renew=2026-12-01"
+                "Add with natural names:\n"
+                "/wallet add Chase Sapphire Preferred\n"
+                "/wallet add Costco Executive fee=120 renew=2026-12-01\n"
+                "/wallet add Venture X"
             )
         lines = ["Your wallet:"]
         for item in items:
@@ -140,19 +167,24 @@ class WalletStore:
         )
 
 
-def parse_wallet_add_args(args: list[str]) -> dict:
-    """Parse: card Chase | Sapphire Preferred fee=95 renew=2026-11-01 notes=..."""
-    if len(args) < 2:
-        raise ValueError("need type and details")
-    item_type = args[0].lower()
-    if item_type not in {"card", "membership"}:
-        raise ValueError("type must be card or membership")
+@dataclass
+class ParsedWalletAdd:
+    """Result of parsing /wallet add args before DB insert."""
 
-    rest = " ".join(args[1:])
+    resolve: ResolveResult
+    annual_fee: float | None = None
+    renewal_date: str | None = None
+    notes: str = ""
+    explicit_type: str | None = None
+    # Used only for unknown custom products with Issuer | Product
+    custom_issuer: str | None = None
+    custom_product: str | None = None
+
+
+def _extract_meta(tokens: list[str]) -> tuple[list[str], float | None, str | None, str]:
     fee = None
     renew = None
     notes = ""
-    tokens = rest.split()
     kept: list[str] = []
     for token in tokens:
         lower = token.lower()
@@ -165,20 +197,61 @@ def parse_wallet_add_args(args: list[str]) -> dict:
             notes = token.split("=", 1)[1]
         else:
             kept.append(token)
-    body = " ".join(kept)
-    if "|" not in body:
-        raise ValueError("use Issuer | Product Name")
-    issuer, product = [part.strip() for part in body.split("|", 1)]
-    if not issuer or not product:
-        raise ValueError("issuer and product required")
-    return {
-        "item_type": item_type,
-        "issuer": issuer,
-        "product_name": product,
-        "annual_fee": fee,
-        "renewal_date": renew,
-        "notes": notes,
-    }
+    return kept, fee, renew, notes
+
+
+def parse_wallet_add_args(args: list[str]) -> ParsedWalletAdd:
+    """Parse natural names like: Chase Sapphire Preferred fee=95
+
+    Optional leading type: card|membership
+    Optional legacy form: Issuer | Product
+    """
+    if not args:
+        raise ValueError("need a product name")
+
+    explicit_type = None
+    tokens = list(args)
+    if tokens[0].lower() in {"card", "membership"}:
+        explicit_type = tokens.pop(0).lower()
+        if not tokens:
+            raise ValueError("need a product name after type")
+
+    kept, fee, renew, notes = _extract_meta(tokens)
+    body = " ".join(kept).strip()
+    if not body:
+        raise ValueError("need a product name")
+
+    # Legacy explicit split still supported for unknown products.
+    if "|" in body:
+        issuer, product = [part.strip() for part in body.split("|", 1)]
+        if not issuer or not product:
+            raise ValueError("issuer and product required")
+        item_type = explicit_type or "card"
+        return ParsedWalletAdd(
+            resolve=ResolveResult(
+                status="matched",
+                product=KnownProduct(item_type, issuer, product),
+                query=body,
+            ),
+            annual_fee=fee,
+            renewal_date=renew,
+            notes=notes,
+            explicit_type=explicit_type,
+            custom_issuer=issuer,
+            custom_product=product,
+        )
+
+    resolve = resolve_product_query(body)
+    if resolve.status == "matched" and resolve.product and explicit_type:
+        # If user forced a type that conflicts, still use catalog product type.
+        pass
+    return ParsedWalletAdd(
+        resolve=resolve,
+        annual_fee=fee,
+        renewal_date=renew,
+        notes=notes,
+        explicit_type=explicit_type,
+    )
 
 
 def days_until(iso_date: str | None) -> int | None:

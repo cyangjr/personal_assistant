@@ -29,8 +29,9 @@ python -m assistant.main
 
 | Command | Purpose |
 | --- | --- |
-| `/wallet add card Chase \| Sapphire Preferred fee=95` | Add card |
-| `/wallet add membership Costco \| Executive fee=120 renew=2026-12-01` | Add membership |
+| `/wallet add Chase Sapphire Preferred` | Add card by natural name |
+| `/wallet add Costco Executive fee=120 renew=2026-12-01` | Add membership |
+| `/wallet add Venture X` | Add Venture X (not plain Venture) |
 | `/opportunities` / `/opportunities scan` | View / refresh opportunities |
 | `/claim chase_sapphire_travel_credit` | Claim checklist |
 | `/benefits` | Cached benefit docs |

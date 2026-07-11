@@ -73,10 +73,22 @@ def test_wallet_and_opportunities(tmp_path: Path):
     assert engine.list_open(1)
 
     parsed = parse_wallet_add_args(
-        ["membership", "Costco", "|", "Executive", "fee=120", "renew=2099-12-01"]
+        ["Costco Executive", "fee=120", "renew=2099-12-01"]
     )
-    assert parsed["issuer"] == "Costco"
-    assert parsed["annual_fee"] == 120
+    assert parsed.resolve.status == "matched"
+    assert parsed.resolve.product is not None
+    assert parsed.resolve.product.issuer == "Costco"
+    assert parsed.resolve.product.product_name == "Executive"
+    assert parsed.annual_fee == 120
+
+    ambiguous = parse_wallet_add_args(["sapphire"])
+    assert ambiguous.resolve.status == "ambiguous"
+    assert ambiguous.resolve.candidates
+    assert len(ambiguous.resolve.candidates) == 2
+
+    venture_x = parse_wallet_add_args(["Venture X"])
+    assert venture_x.resolve.status == "matched"
+    assert venture_x.resolve.product.product_name == "Venture X"
 
 
 def test_benefit_cache(tmp_path: Path):

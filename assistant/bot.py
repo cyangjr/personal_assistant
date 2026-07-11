@@ -16,6 +16,7 @@ from telegram.helpers import escape_markdown
 from assistant.actions import format_action, format_actions_for_label, get_action
 from assistant.auth import is_allowed
 from assistant.benefits import BenefitGraph
+from assistant.catalog import format_candidate_prompt
 from assistant.config import Settings
 from assistant.db import Database
 from assistant.llm import GroqAssistant
@@ -31,8 +32,9 @@ HELP_TEXT = """*Personal Assistant*
 
 Wallet & benefits:
 /wallet — show structured cards/memberships
-/wallet add card Issuer \\| Product
-/wallet add membership Issuer \\| Product fee\\=120 renew\\=2026\\-12\\-01
+/wallet add Chase Sapphire Preferred
+/wallet add Costco Executive fee\\=120 renew\\=2026\\-12\\-01
+/wallet add Venture X
 /wallet del `<id>`
 /opportunities — unused\\-value opportunities
 /opportunities scan — refresh opportunities now
@@ -218,19 +220,11 @@ class BotApp:
 
         action = args[0].lower()
         if action == "add":
-            try:
-                parsed = parse_wallet_add_args(args[1:])
-                item = self.wallet.add(chat_id=chat_id, **parsed)
-            except Exception as exc:
-                await update.effective_message.reply_text(
-                    "Could not add wallet item.\n"
-                    "Example: /wallet add card Chase | Sapphire Preferred fee=95\n"
-                    f"Error: {exc}"
-                )
-                return
-            await update.effective_message.reply_text(
-                f"Added #{item.id} [{item.item_type}] {item.label()}"
-            )
+            await self._wallet_add(update, context, args[1:])
+            return
+
+        if action == "pick":
+            await self._wallet_pick(update, context, args[1:])
             return
 
         if action in {"del", "delete", "rm"}:
@@ -244,6 +238,116 @@ class BotApp:
             return
 
         await update.effective_message.reply_text(self.wallet.format(chat_id))
+
+    async def _wallet_add(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        args: list[str],
+    ) -> None:
+        chat_id = update.effective_chat.id
+        try:
+            parsed = parse_wallet_add_args(args)
+        except Exception as exc:
+            await update.effective_message.reply_text(
+                "Could not parse that.\n"
+                "Examples:\n"
+                "/wallet add Chase Sapphire Preferred\n"
+                "/wallet add Venture X fee=395\n"
+                "/wallet add Costco Executive fee=120 renew=2026-12-01\n"
+                f"Error: {exc}"
+            )
+            return
+
+        resolve = parsed.resolve
+        if resolve.status == "ambiguous" and resolve.candidates:
+            context.user_data["pending_wallet_add"] = {
+                "candidates": [
+                    {
+                        "item_type": c.item_type,
+                        "issuer": c.issuer,
+                        "product_name": c.product_name,
+                    }
+                    for c in resolve.candidates
+                ],
+                "annual_fee": parsed.annual_fee,
+                "renewal_date": parsed.renewal_date,
+                "notes": parsed.notes,
+            }
+            await update.effective_message.reply_text(
+                format_candidate_prompt(resolve.candidates, resolve.query)
+            )
+            return
+
+        if resolve.status == "unknown" or not resolve.product:
+            await update.effective_message.reply_text(
+                f'I don\'t recognize "{resolve.query}".\n'
+                "Try a fuller name like:\n"
+                "- Chase Sapphire Preferred\n"
+                "- Capital One Venture X\n"
+                "- Costco Executive\n"
+                "Or custom: /wallet add card Amex | Everyday Preferred"
+            )
+            return
+
+        item = self.wallet.add_known(
+            chat_id=chat_id,
+            product=resolve.product,
+            annual_fee=parsed.annual_fee,
+            renewal_date=parsed.renewal_date,
+            notes=parsed.notes,
+        )
+        context.user_data.pop("pending_wallet_add", None)
+        await update.effective_message.reply_text(
+            f"Added #{item.id} [{item.item_type}] {item.label()}"
+        )
+
+    async def _wallet_pick(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        args: list[str],
+    ) -> None:
+        pending = context.user_data.get("pending_wallet_add")
+        if not pending:
+            await update.effective_message.reply_text(
+                "Nothing to pick. Use /wallet add <name> first."
+            )
+            return
+        if not args or not args[0].isdigit():
+            await update.effective_message.reply_text("Usage: /wallet pick <number>")
+            return
+        await self._complete_wallet_pick(update, context, int(args[0]))
+
+    async def _complete_wallet_pick(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        choice: int,
+    ) -> None:
+        pending = context.user_data.get("pending_wallet_add")
+        if not pending:
+            return
+        candidates = pending.get("candidates") or []
+        if choice < 1 or choice > len(candidates):
+            await update.effective_message.reply_text(
+                f"Pick a number between 1 and {len(candidates)}."
+            )
+            return
+        selected = candidates[choice - 1]
+        item = self.wallet.add(
+            chat_id=update.effective_chat.id,
+            item_type=selected["item_type"],
+            issuer=selected["issuer"],
+            product_name=selected["product_name"],
+            annual_fee=pending.get("annual_fee"),
+            renewal_date=pending.get("renewal_date"),
+            notes=pending.get("notes") or "",
+        )
+        context.user_data.pop("pending_wallet_add", None)
+        await update.effective_message.reply_text(
+            f"Added #{item.id} [{item.item_type}] {item.label()}"
+        )
 
     async def opportunities_command(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -321,6 +425,12 @@ class BotApp:
         chat_id = update.effective_chat.id
         user_text = (message.text or "").strip()
         if not user_text:
+            return
+
+        # If user was asked to disambiguate a wallet add, accept a bare number.
+        pending = context.user_data.get("pending_wallet_add")
+        if pending and user_text.isdigit():
+            await self._complete_wallet_pick(update, context, int(user_text))
             return
 
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
