@@ -1,22 +1,19 @@
 # Personal Assistant
 
-Private Telegram bot powered by **Groq** (chat) and **Tavily** (web search for benefits). Helps with everyday questions and looks up public credit-card / membership benefits — no PDF uploads required.
+Private Telegram bot powered by **Groq** (chat) and **Tavily** (web search). Focused on credit-card / membership benefits: structured wallet, cached benefit graph, opportunity alerts, claim checklists, evals, and usage stats.
 
 ## Features
 
-- Long-polling Telegram bot (no public URL needed for local use)
-- Allowlisted `chat_id`s only
-- Groq `llama-3.3-70b-versatile` for replies
-- SQLite conversation memory + profile notes (cards, memberships)
-- Tavily web search for benefit/membership questions, with source URLs
+1. **Structured wallet** — typed cards/memberships (`/wallet`)
+2. **Benefit graph** — cached official lookups with source URL + fetch time (`/benefits`)
+3. **Opportunity engine** — weekly (or `/opportunities scan`) unused-value alerts
+4. **Action helpers** — claim checklists + deep links (`/claim`)
+5. **Eval harness** — 50 benefit QA cases (`python -m assistant.eval_runner`)
+6. **Cost/latency dashboard** — `/stats`
+
+Also: allowlisted chats, SQLite memory, Tavily only for benefit-style questions.
 
 ## Setup
-
-1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token.
-2. Create a Groq key at [console.groq.com/keys](https://console.groq.com/keys).
-3. Create a Tavily key at [app.tavily.com](https://app.tavily.com/home).
-4. Find your Telegram chat id (message the bot once after start, or use `@userinfobot`).
-5. Install and configure:
 
 ```bash
 cd personal-assistant
@@ -24,27 +21,27 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# edit .env with TELEGRAM_BOT_TOKEN, GROQ_API_KEY, TAVILY_API_KEY, ALLOWED_CHAT_IDS
-```
-
-6. Run:
-
-```bash
+# fill TELEGRAM_BOT_TOKEN, GROQ_API_KEY, TAVILY_API_KEY, ALLOWED_CHAT_IDS
 python -m assistant.main
 ```
 
-Then open Telegram and message your bot.
+## Key commands
 
-## Commands
-
-| Command | What it does |
+| Command | Purpose |
 | --- | --- |
-| `/start` | Intro |
-| `/help` | Help |
-| `/clear` | Clear conversation memory |
-| `/profile` | Show saved notes |
-| `/profile set cards Chase Sapphire Preferred, Costco Executive` | Save a note |
-| `/profile del cards` | Delete a note |
+| `/wallet add card Chase \| Sapphire Preferred fee=95` | Add card |
+| `/wallet add membership Costco \| Executive fee=120 renew=2026-12-01` | Add membership |
+| `/opportunities` / `/opportunities scan` | View / refresh opportunities |
+| `/claim chase_sapphire_travel_credit` | Claim checklist |
+| `/benefits` | Cached benefit docs |
+| `/stats` | Usage / cost / cache hit rate |
+
+## Evals
+
+```bash
+python -m assistant.eval_runner          # offline structure check (50 cases)
+python -m assistant.eval_runner --live --limit 5   # live Groq+Tavily (uses quota)
+```
 
 ## Environment
 
@@ -55,12 +52,4 @@ Then open Telegram and message your bot.
 | `TAVILY_API_KEY` | yes | Tavily API key |
 | `ALLOWED_CHAT_IDS` | yes | Comma-separated chat ids |
 | `GROQ_MODEL` | no | Default `llama-3.3-70b-versatile` |
-| `TAVILY_MAX_RESULTS` | no | Default `5` |
-| `HISTORY_LIMIT` | no | Recent messages kept (default `20`) |
-| `DATABASE_PATH` | no | SQLite path (default `data/assistant.db`) |
-
-## Notes
-
-- Tavily search runs only for benefit/membership-style questions to conserve free-tier search credits.
-- Unauthorized chats are rejected and shown their `chat_id` so you can add them to the allowlist.
-- Deploy later with a webhook host if you want the bot always online; local long polling is enough to start.
+| `OPPORTUNITY_INTERVAL_SECONDS` | no | Default weekly (`604800`) |

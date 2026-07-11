@@ -19,6 +19,7 @@ class Settings:
     history_limit: int = 20
     database_path: Path = Path("data/assistant.db")
     tavily_max_results: int = 5
+    opportunity_interval_seconds: int = 7 * 24 * 60 * 60
 
 
 def _parse_chat_ids(raw: str) -> frozenset[int]:
@@ -62,4 +63,7 @@ def load_settings() -> Settings:
         history_limit=int(os.getenv("HISTORY_LIMIT", "20")),
         database_path=Path(os.getenv("DATABASE_PATH", "data/assistant.db")),
         tavily_max_results=int(os.getenv("TAVILY_MAX_RESULTS", "5")),
+        opportunity_interval_seconds=int(
+            os.getenv("OPPORTUNITY_INTERVAL_SECONDS", str(7 * 24 * 60 * 60))
+        ),
     )
